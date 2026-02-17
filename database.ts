@@ -1,7 +1,7 @@
 
 import { Wash, Staff, Expense, LoyaltyConfig, ClientProgress } from './types';
 
-const STORAGE_KEY_PREFIX = 'sparcar_pro_v7';
+const STORAGE_KEY_PREFIX = 'sparcar_pro_v8';
 
 const DEFAULT_LOYALTY: LoyaltyConfig = {
   theme: 'grad-ocean',
@@ -20,8 +20,8 @@ const DEFAULT_STAFF: Staff[] = [
 
 async function callApi(sql: string, params: any[] = []) {
   const controller = new AbortController();
-  // Aumentado para 30 segundos para suportar cold starts do banco e da Vercel
-  const timeoutId = setTimeout(() => controller.abort(), 30000); 
+  // Aumentamos para 45 segundos pois o Neon pode demorar para acordar
+  const timeoutId = setTimeout(() => controller.abort(), 45000); 
 
   try {
     const res = await fetch('/api/sql', {
@@ -32,8 +32,8 @@ async function callApi(sql: string, params: any[] = []) {
     });
 
     if (!res.ok) {
-      const errorData = await res.json();
-      throw new Error(errorData.details || errorData.error || 'Erro desconhecido na API');
+      const errorData = await res.json().catch(() => ({ error: 'Servidor Offline', details: 'A rota /api/sql não respondeu.' }));
+      throw new Error(errorData.details || errorData.error || 'Erro na comunicação com o banco.');
     }
 
     const data = await res.json();
@@ -41,8 +41,11 @@ async function callApi(sql: string, params: any[] = []) {
     return data;
   } catch (e: any) {
     clearTimeout(timeoutId);
-    // Melhora a mensagem de erro para o usuário
-    if (e.name === 'AbortError') throw new Error('O banco demorou muito para responder (Timeout de 30s). Tente recarregar.');
+    if (e.name === 'AbortError') {
+      console.error("⏱️ O servidor demorou mais de 45s para responder.");
+      throw new Error('Tempo esgotado. Verifique se o banco Neon está ativo.');
+    }
+    console.error("🔌 Erro de Conexão:", e.message);
     throw e;
   }
 }
@@ -54,9 +57,11 @@ const storage = {
 
 export const db = {
   async init() {
-    console.log("🛠️ Iniciando Auto-Setup no Neon (Timeout: 30s)...");
+    console.log("🚀 Sparcar: Verificando banco de dados...");
     try {
-      // Criação das tabelas necessárias
+      // Teste simples para ver se a API está lá
+      await callApi("SELECT 1");
+
       const queries = [
         `CREATE TABLE IF NOT EXISTS washes (id TEXT PRIMARY KEY, clientName TEXT, clientPhone TEXT, plate TEXT, model TEXT, type TEXT, status TEXT, assignedStaff TEXT, price NUMERIC, services TEXT, vehicleType TEXT, date TEXT);`,
         `CREATE TABLE IF NOT EXISTS staff (id TEXT PRIMARY KEY, name TEXT, role TEXT, photo TEXT, daysWorked INTEGER DEFAULT 0, dailyRate NUMERIC DEFAULT 50, commission NUMERIC DEFAULT 0, unpaid NUMERIC DEFAULT 0, queuePosition INTEGER, isActive BOOLEAN DEFAULT true);`,
@@ -69,7 +74,6 @@ export const db = {
         await callApi(q);
       }
 
-      // Popula staff se estiver vazio
       const checkStaff = await callApi("SELECT COUNT(*) FROM staff");
       if (parseInt(checkStaff.rows[0].count) === 0) {
         for (const s of DEFAULT_STAFF) {
@@ -77,10 +81,10 @@ export const db = {
         }
       }
 
-      console.log("✅ Banco de Dados Neon Sincronizado!");
+      console.log("✅ Sincronizado com Neon.");
       return true;
     } catch (e: any) {
-      console.error("❌ Falha na Conexão Neon:", e.message);
+      console.warn("⚠️ Banco remoto não disponível. Motivo:", e.message);
       return false;
     }
   },
