@@ -13,19 +13,19 @@ export default async function handler(req: Request) {
     const body = await req.json();
     const { query, params } = body;
 
-    // Chave exata fornecida pelo usuário
+    // Chave exata fornecida pelo usuário no prompt anterior
     const DATABASE_URL = process.env.DATABASE_URL_NEON || "postgresql://neondb_owner:npg_Zle4yEaI6BiN@ep-blue-voice-aj19kiu7-pooler.c-3.us-east-2.aws.neon.tech/neondb?sslmode=require";
     
-    // Extração robusta do host
-    // De: postgresql://user:pass@ep-id-pooler.region.aws.neon.tech/db
-    // Para: ep-id.region.aws.neon.tech
-    const hostMatch = DATABASE_URL.match(/@([^/?#:]+)/);
-    const rawHost = hostMatch ? hostMatch[1] : '';
-    const cleanHost = rawHost.replace('-pooler', ''); 
+    // Extração manual para evitar bugs de regex em diferentes ambientes
+    // Exemplo: postgresql://neondb_owner:PASSWORD@ep-host-pooler.region.neon.tech/neondb
+    const parts = DATABASE_URL.split('@');
+    if (parts.length < 2) throw new Error("URL de conexão inválida");
     
-    // Senha (usada como Bearer Token na API HTTP do Neon)
-    const passMatch = DATABASE_URL.match(/:\/\/([^:]+):([^@]+)@/);
-    const password = passMatch ? passMatch[2] : '';
+    const credentials = parts[0].split('//')[1]; // neondb_owner:PASSWORD
+    const password = credentials.split(':')[1];
+    
+    const hostPart = parts[1].split('/')[0]; // ep-host-pooler.region.neon.tech
+    const cleanHost = hostPart.replace('-pooler', ''); // ep-host.region.neon.tech
 
     const endpoint = `https://${cleanHost}/sql`;
 
@@ -41,16 +41,18 @@ export default async function handler(req: Request) {
     const result = await response.json();
     
     if (!response.ok) {
+      console.error("Erro retornado pelo Neon:", result);
       return new Response(JSON.stringify({ 
-        error: 'Neon API Error', 
-        details: result.message || 'Erro ao executar comando SQL no Neon' 
+        error: 'Erro na API do Neon', 
+        details: result.message || JSON.stringify(result)
       }), { status: response.status, headers: HEADERS });
     }
 
     return new Response(JSON.stringify(result), { status: 200, headers: HEADERS });
   } catch (error: any) {
+    console.error("Falha Crítica no Proxy SQL:", error.message);
     return new Response(JSON.stringify({ 
-      error: 'Connection Failure', 
+      error: 'Falha de Conexão Interna', 
       message: error.message 
     }), { status: 500, headers: HEADERS });
   }
