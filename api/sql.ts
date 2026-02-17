@@ -8,59 +8,45 @@ export default async function handler(req: Request) {
   };
 
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: HEADERS });
-  if (req.method !== 'POST') return new Response(JSON.stringify({ error: 'Método não permitido' }), { status: 405, headers: HEADERS });
-
+  
   try {
-    const body = await req.json();
-    const { query, params } = body;
+    const { query, params } = await req.json();
 
-    // A variável DATABASE_URL deve ser configurada no painel da Vercel ou no .env local
-    // O fallback abaixo é o que você forneceu, mas o ideal é que venha do ambiente
+    // String de conexão vinda do ambiente (configurar na Vercel) ou fallback
     const DATABASE_URL = process.env.DATABASE_URL || "postgresql://neondb_owner:npg_Zle4yEaI6BiN@ep-blue-voice-aj19kiu7-pooler.c-3.us-east-2.aws.neon.tech/neondb?sslmode=require";
     
-    // Extração robusta do host para o endpoint HTTP do Neon
-    // Exemplo: ep-blue-voice-aj19kiu7-pooler.c-3.us-east-2.aws.neon.tech -> ep-blue-voice-aj19kiu7.c-3.us-east-2.aws.neon.tech
+    // 1. Limpa a URL para pegar o host correto
     const hostMatch = DATABASE_URL.match(/@([^/?#:]+)/);
-    if (!hostMatch) throw new Error("URL do banco de dados inválida no DATABASE_URL.");
+    const host = hostMatch ? hostMatch[1].replace('-pooler', '') : '';
     
-    const rawHost = hostMatch[1];
-    const cleanHost = rawHost.replace('-pooler', '');
-    const neonHttpEndpoint = `https://${cleanHost}/sql`;
+    // 2. Extrai a senha para autenticação (Bearer token no Neon HTTP)
+    const passMatch = DATABASE_URL.match(/:\/\/([^:]+):([^@]+)@/);
+    const password = passMatch ? passMatch[2] : '';
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000); // 10 segundos para operações de banco
+    const endpoint = `https://${host}/sql`;
 
-    const response = await fetch(neonHttpEndpoint, {
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${password}` // O Neon aceita a senha do banco como token na API HTTP
       },
-      body: JSON.stringify({ 
-        query, 
-        params, 
-        // O proxy HTTP do Neon precisa da string de conexão para saber em qual banco executar
-        connectionString: DATABASE_URL 
-      }),
-      signal: controller.signal
+      body: JSON.stringify({ query, params }),
     });
 
-    clearTimeout(timeout);
-    
     const result = await response.json();
-
+    
     if (!response.ok) {
-      console.error("Erro retornado pelo Neon:", result);
       return new Response(JSON.stringify({ 
-        error: 'Erro no Banco Remoto', 
-        details: result.message || 'Erro desconhecido no Neon' 
+        error: 'Erro no Neon', 
+        details: result.message || 'Erro desconhecido' 
       }), { status: response.status, headers: HEADERS });
     }
 
     return new Response(JSON.stringify(result), { status: 200, headers: HEADERS });
   } catch (error: any) {
-    console.error("Falha Crítica na API SQL:", error.message);
     return new Response(JSON.stringify({ 
-      error: 'Falha de Comunicação', 
+      error: 'Falha na Ponte SQL', 
       message: error.message 
     }), { status: 500, headers: HEADERS });
   }
