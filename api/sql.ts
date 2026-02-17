@@ -3,7 +3,7 @@ export default async function handler(req: Request) {
   const HEADERS = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Neon-Connection-String',
+    'Access-Control-Allow-Headers': 'Content-Type',
     'Content-Type': 'application/json',
   };
 
@@ -14,30 +14,54 @@ export default async function handler(req: Request) {
     const body = await req.json();
     const { query, params } = body;
 
+    // A variável DATABASE_URL deve ser configurada no painel da Vercel ou no .env local
+    // O fallback abaixo é o que você forneceu, mas o ideal é que venha do ambiente
     const DATABASE_URL = process.env.DATABASE_URL || "postgresql://neondb_owner:npg_Zle4yEaI6BiN@ep-blue-voice-aj19kiu7-pooler.c-3.us-east-2.aws.neon.tech/neondb?sslmode=require";
-    const cleanDbUrl = DATABASE_URL.replace('-pooler', '');
+    
+    // Extração robusta do host para o endpoint HTTP do Neon
+    // Exemplo: ep-blue-voice-aj19kiu7-pooler.c-3.us-east-2.aws.neon.tech -> ep-blue-voice-aj19kiu7.c-3.us-east-2.aws.neon.tech
+    const hostMatch = DATABASE_URL.match(/@([^/?#:]+)/);
+    if (!hostMatch) throw new Error("URL do banco de dados inválida no DATABASE_URL.");
+    
+    const rawHost = hostMatch[1];
+    const cleanHost = rawHost.replace('-pooler', '');
+    const neonHttpEndpoint = `https://${cleanHost}/sql`;
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 6000); // 6 segundos de tempo limite
+    const timeout = setTimeout(() => controller.abort(), 10000); // 10 segundos para operações de banco
 
-    const response = await fetch('https://proxy.neon.tech/sql', {
+    const response = await fetch(neonHttpEndpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Neon-Connection-String': cleanDbUrl,
       },
-      body: JSON.stringify({ query, params }),
+      body: JSON.stringify({ 
+        query, 
+        params, 
+        // O proxy HTTP do Neon precisa da string de conexão para saber em qual banco executar
+        connectionString: DATABASE_URL 
+      }),
       signal: controller.signal
     });
 
     clearTimeout(timeout);
+    
     const result = await response.json();
-    return new Response(JSON.stringify(result), { status: response.status, headers: HEADERS });
+
+    if (!response.ok) {
+      console.error("Erro retornado pelo Neon:", result);
+      return new Response(JSON.stringify({ 
+        error: 'Erro no Banco Remoto', 
+        details: result.message || 'Erro desconhecido no Neon' 
+      }), { status: response.status, headers: HEADERS });
+    }
+
+    return new Response(JSON.stringify(result), { status: 200, headers: HEADERS });
   } catch (error: any) {
+    console.error("Falha Crítica na API SQL:", error.message);
     return new Response(JSON.stringify({ 
-      error: 'Banco Indisponível', 
-      message: 'O servidor do banco de dados demorou para responder. Operando em modo local.',
-      details: error.message 
-    }), { status: 503, headers: HEADERS });
+      error: 'Falha de Comunicação', 
+      message: error.message 
+    }), { status: 500, headers: HEADERS });
   }
 }

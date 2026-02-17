@@ -13,6 +13,7 @@ import LoginView from './views/LoginView.tsx';
 const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isConnected, setIsConnected] = useState<boolean | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userRole, setUserRole] = useState<UserRole | null>(null);
   const [currentUser, setCurrentUser] = useState<Staff | null>(null);
@@ -26,24 +27,45 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const initApp = async () => {
+      // Carrega dados do cache local IMEDIATAMENTE para evitar tela branca
+      const localWashes = JSON.parse(localStorage.getItem('sparcar_v3_washes') || '[]');
+      const localStaff = JSON.parse(localStorage.getItem('sparcar_v3_staff') || '[]');
+      const localLoyalty = JSON.parse(localStorage.getItem('sparcar_v3_loyalty') || 'null');
+      const localProgress = JSON.parse(localStorage.getItem('sparcar_v3_progress') || '{}');
+      const localExpenses = JSON.parse(localStorage.getItem('sparcar_v3_expenses') || '[]');
+      
+      setWashes(localWashes);
+      setExpenses(localExpenses);
+      setStaff(localStaff.length ? localStaff : [
+        { id: '1', name: 'João Lavador', role: 'Lavador', daysWorked: 0, dailyRate: 50, commission: 0, unpaid: 0, queuePosition: 1, isActive: true },
+        { id: '2', name: 'Maria Detailer', role: 'Lavador', daysWorked: 0, dailyRate: 50, commission: 0, unpaid: 0, queuePosition: 2, isActive: true }
+      ]);
+      setLoyalty(localLoyalty);
+      setClientLoyalty(localProgress);
+      
+      setIsLoading(false);
+
+      // Sincroniza com o banco remoto Neon
       try {
-        await db.init();
-        const [w, s, e, l, p] = await Promise.all([
-          db.getWashes(),
-          db.getStaff(),
-          db.getExpenses(),
-          db.getLoyalty(),
-          db.getClientProgress()
-        ]);
-        setWashes(w);
-        setStaff(s);
-        setExpenses(e);
-        setLoyalty(l);
-        setClientLoyalty(p);
+        const connected = await db.init();
+        setIsConnected(connected);
+        
+        if (connected) {
+          const [w, s, l, p, e] = await Promise.all([
+            db.getWashes(),
+            db.getStaff(),
+            db.getLoyalty(),
+            db.getClientProgress(),
+            db.getExpenses()
+          ]);
+          setWashes(w);
+          setStaff(s);
+          setLoyalty(l);
+          setClientLoyalty(p);
+          setExpenses(e);
+        }
       } catch (err: any) {
-        console.warn("App carregado em modo de resiliência (Local)");
-      } finally {
-        setIsLoading(false);
+        setIsConnected(false);
       }
     };
     initApp();
@@ -64,11 +86,11 @@ const App: React.FC = () => {
 
   const handleAddWash = async (newWash: Omit<Wash, 'id'>) => {
     setIsSyncing(true);
+    const washWithId = { ...newWash, id: Math.random().toString(36).substr(2, 9) };
+    setWashes([washWithId, ...washes]);
+    
     try {
-      const washWithId = { ...newWash, id: Math.random().toString(36).substr(2, 9) };
       await db.saveWash(washWithId);
-      setWashes([washWithId, ...washes]);
-      
       const assigned = staff.find(s => s.name === newWash.assignedStaff);
       if (assigned) {
         const maxPos = staff.length > 0 ? Math.max(...staff.map(s => s.queuePosition)) : 0;
@@ -79,116 +101,57 @@ const App: React.FC = () => {
       }
       setCurrentView(View.WASHES);
     } catch (e) {
-      console.error("Erro ao salvar");
+      console.error("Erro ao sincronizar nova lavagem");
     } finally {
       setIsSyncing(false);
     }
   };
 
   const handleUpdateWashStatus = async (id: string) => {
+    const wash = washes.find(w => w.id === id);
+    if (!wash) return;
+    const updated: Wash = { ...wash, status: wash.status === 'PAID' ? 'PENDING' : 'PAID' };
+    setWashes(prev => prev.map(w => w.id === id ? updated : w));
+    
     setIsSyncing(true);
     try {
-      const wash = washes.find(w => w.id === id);
-      if (!wash) return;
-      const updated: Wash = { ...wash, status: wash.status === 'PAID' ? 'PENDING' : 'PAID' };
       await db.saveWash(updated);
-      setWashes(prev => prev.map(w => w.id === id ? updated : w));
-    } catch (e) {
-      console.error("Erro status");
     } finally {
       setIsSyncing(false);
     }
   };
 
   const handleFinalizeWash = async (id: string) => {
-    setIsSyncing(true);
-    try {
-      const wash = washes.find(w => w.id === id);
-      if (!wash || !loyalty) return;
-      const updatedWash = { ...wash, status: 'PAID' as const };
-      await db.saveWash(updatedWash);
-      setWashes(prev => prev.map(w => w.id === id ? updatedWash : w));
-      if (loyalty.isActive) {
-        const clientKey = wash.clientPhone || wash.clientName;
-        const current = clientLoyalty[clientKey] || { stamps: 0, lastWashDate: '', phone: wash.clientPhone || '' };
-        const newStamps = current.stamps + 1;
-        const updatedProgress = {
-          ...current,
-          stamps: newStamps > loyalty.stampsRequired ? 1 : newStamps,
-          lastWashDate: wash.date,
-          phone: wash.clientPhone || current.phone
-        };
+    const wash = washes.find(w => w.id === id);
+    if (!wash || !loyalty) return;
+    
+    const updatedWash = { ...wash, status: 'PAID' as const };
+    setWashes(prev => prev.map(w => w.id === id ? updatedWash : w));
+    
+    if (loyalty.isActive) {
+      const clientKey = wash.clientPhone || wash.clientName;
+      const current = clientLoyalty[clientKey] || { stamps: 0, lastWashDate: '', phone: wash.clientPhone || '' };
+      const newStamps = current.stamps + 1;
+      const updatedProgress = {
+        ...current,
+        stamps: newStamps > loyalty.stampsRequired ? 1 : newStamps,
+        lastWashDate: wash.date,
+        phone: wash.clientPhone || current.phone
+      };
+      setClientLoyalty(prev => ({ ...prev, [clientKey]: updatedProgress }));
+      
+      setIsSyncing(true);
+      try {
+        await db.saveWash(updatedWash);
         await db.saveClientProgress(clientKey, updatedProgress);
-        setClientLoyalty(prev => ({ ...prev, [clientKey]: updatedProgress }));
+      } finally {
+        setIsSyncing(false);
       }
-    } catch (e) {
-      console.error("Erro finalize");
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  const handleAddExpense = async (exp: Omit<Expense, 'id'>) => {
-    setIsSyncing(true);
-    try {
-      const newExp = { ...exp, id: Math.random().toString(36).substr(2, 9) };
-      await db.saveExpense(newExp);
-      setExpenses([newExp, ...expenses]);
-    } catch (e) {
-      console.error("Erro despesa");
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  const handleAddStaff = async (name: string, role: string) => {
-    setIsSyncing(true);
-    try {
-      const maxPos = staff.length > 0 ? Math.max(...staff.map(s => s.queuePosition)) : 0;
-      const newMember: Staff = { id: Math.random().toString(36).substr(2, 9), name, role, daysWorked: 0, dailyRate: 50, commission: 0, unpaid: 0, queuePosition: maxPos + 1, isActive: true };
-      await db.saveStaff(newMember);
-      setStaff([...staff, newMember].sort((a,b) => a.queuePosition - b.queuePosition));
-    } catch (e) {
-      console.error("Erro staff");
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  const handleUpdateStaffQueue = async (staffId: string, action: 'TOP' | 'BOTTOM' | 'TOGGLE') => {
-    setIsSyncing(true);
-    try {
-      const member = staff.find(s => s.id === staffId);
-      if (!member) return;
-      let updated = { ...member };
-      if (action === 'TOP') { updated.queuePosition = Math.min(...staff.map(s => s.queuePosition)) - 1; } 
-      else if (action === 'BOTTOM') { updated.queuePosition = Math.max(...staff.map(s => s.queuePosition)) + 1; } 
-      else if (action === 'TOGGLE') { updated.isActive = !member.isActive; }
-      await db.saveStaff(updated);
-      const freshStaff = await db.getStaff();
-      setStaff(freshStaff);
-    } catch (e) {
-      console.error("Erro queue");
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  const handleSaveLoyalty = async (config: LoyaltyConfig) => {
-    setIsSyncing(true);
-    try {
-      await db.saveLoyalty(config);
-      setLoyalty(config);
-    } catch (e) {
-      console.error("Erro loyalty");
-    } finally {
-      setIsSyncing(false);
     }
   };
 
   const renderView = () => {
-    // Configurações padrão se o banco falhar e não houver cache
-    const safeLoyalty = loyalty || { theme: 'blue', stampsRequired: 10, rewardDescription: 'Grátis', isActive: true, companyName: 'Sparcar', stampIcon: 'water_drop' };
+    const safeLoyalty = loyalty || { theme: 'grad-ocean', stampsRequired: 10, rewardDescription: 'Grátis', isActive: true, companyName: 'Sparcar', stampIcon: 'water_drop' };
     
     switch (currentView) {
       case View.WASHES:
@@ -196,25 +159,46 @@ const App: React.FC = () => {
       case View.DASHBOARD:
         return <DashboardView washes={washes} expenses={expenses} staff={staff} />;
       case View.FINANCE:
-        return <FinanceView expenses={expenses} washes={washes} onAddExpense={handleAddExpense} />;
+        return <FinanceView expenses={expenses} washes={washes} onAddExpense={async (exp) => {
+          const newExp = { ...exp, id: Math.random().toString(36).substr(2, 9) } as Expense;
+          setExpenses([newExp, ...expenses]);
+          await db.saveExpense(newExp);
+        }} />;
       case View.LOYALTY:
-        return <LoyaltyView config={safeLoyalty as any} clientProgress={clientLoyalty} onSave={handleSaveLoyalty} />;
+        return <LoyaltyView config={safeLoyalty as any} clientProgress={clientLoyalty} onSave={async (config) => {
+          setLoyalty(config);
+          await db.saveLoyalty(config);
+        }} />;
       case View.STAFF:
-        return <StaffView staff={staff} washes={washes} onAddStaff={handleAddStaff} onUpdateQueue={handleUpdateStaffQueue} onUpdateEarnings={async (id, days, rate, commission) => {
-            const s = staff.find(x => x.id === id);
-            if (s) {
-              const updated = { ...s, daysWorked: days, dailyRate: rate, commission: commission, unpaid: (days * rate) + commission };
-              await db.saveStaff(updated);
-              setStaff(prev => prev.map(x => x.id === id ? updated : x));
-            }
-          }} onPay={async (id) => {
-            const s = staff.find(x => x.id === id);
-            if (s) {
-              const updated = { ...s, unpaid: 0, daysWorked: 0, commission: 0 };
-              await db.saveStaff(updated);
-              setStaff(prev => prev.map(x => x.id === id ? updated : x));
-            }
-          }} />;
+        return <StaffView staff={staff} washes={washes} onAddStaff={async (name, role) => {
+          const maxPos = staff.length > 0 ? Math.max(...staff.map(s => s.queuePosition)) : 0;
+          const newMember: Staff = { id: Math.random().toString(36).substr(2, 9), name, role, daysWorked: 0, dailyRate: 50, commission: 0, unpaid: 0, queuePosition: maxPos + 1, isActive: true };
+          setStaff([...staff, newMember]);
+          await db.saveStaff(newMember);
+        }} onUpdateQueue={async (staffId, action) => {
+          const member = staff.find(s => s.id === staffId);
+          if (!member) return;
+          let updated = { ...member };
+          if (action === 'TOP') { updated.queuePosition = Math.min(...staff.map(s => s.queuePosition)) - 1; } 
+          else if (action === 'BOTTOM') { updated.queuePosition = Math.max(...staff.map(s => s.queuePosition)) + 1; } 
+          else if (action === 'TOGGLE') { updated.isActive = !member.isActive; }
+          setStaff(prev => prev.map(s => s.id === staffId ? updated : s).sort((a,b) => a.queuePosition - b.queuePosition));
+          await db.saveStaff(updated);
+        }} onUpdateEarnings={async (id, days, rate, commission) => {
+          const s = staff.find(x => x.id === id);
+          if (s) {
+            const updated = { ...s, daysWorked: days, dailyRate: rate, commission: commission, unpaid: (days * rate) + commission };
+            setStaff(prev => prev.map(x => x.id === id ? updated : x));
+            await db.saveStaff(updated);
+          }
+        }} onPay={async (id) => {
+          const s = staff.find(x => x.id === id);
+          if (s) {
+            const updated = { ...s, unpaid: 0, daysWorked: 0, commission: 0 };
+            setStaff(prev => prev.map(x => x.id === id ? updated : x));
+            await db.saveStaff(updated);
+          }
+        }} />;
       case View.NEW_WASH:
         return <NewWashView onCancel={() => setCurrentView(View.WASHES)} onConfirm={handleAddWash} staff={staff} loyaltyConfig={safeLoyalty as any} clientLoyalty={clientLoyalty} />;
       default:
@@ -222,18 +206,31 @@ const App: React.FC = () => {
     }
   };
 
-  if (isLoading) return <div className="fixed inset-0 bg-primary flex items-center justify-center text-white font-black animate-pulse">SPARCAR CARREGANDO...</div>;
+  if (isLoading) return <div className="fixed inset-0 bg-primary flex flex-col items-center justify-center text-white font-black animate-pulse">
+    <span className="material-icons text-6xl mb-4">local_car_wash</span>
+    SPARCAR CARREGANDO...
+  </div>;
+
   if (!isAuthenticated) return <LoginView staffList={staff} onLogin={handleLogin} />;
 
   return (
     <div className="flex flex-col min-h-screen bg-slate-50 dark:bg-slate-950 font-display text-slate-900 dark:text-slate-100">
-      <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100]">
+      {/* Barra de Status Superior */}
+      <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex gap-2">
         {isSyncing && (
           <div className="bg-slate-900/90 text-white px-6 py-2 rounded-full text-[10px] font-black uppercase flex items-center gap-2 shadow-2xl backdrop-blur-md">
             <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-            Sincronizando
+            Salvando...
           </div>
         )}
+        <div className={`px-4 py-2 rounded-full text-[9px] font-black uppercase flex items-center gap-2 shadow-xl backdrop-blur-md border ${
+          isConnected === true ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' : 
+          isConnected === false ? 'bg-rose-500/10 text-rose-500 border-rose-500/20' : 
+          'bg-slate-500/10 text-slate-500 border-slate-500/20'
+        }`}>
+          <span className="material-icons text-[12px]">{isConnected === true ? 'cloud_done' : isConnected === false ? 'cloud_off' : 'cloud_sync'}</span>
+          {isConnected === true ? 'NUVEM OK' : isConnected === false ? 'MODO LOCAL' : 'CONECTANDO...'}
+        </div>
       </div>
 
       <div className="fixed top-6 right-6 z-[60]">
