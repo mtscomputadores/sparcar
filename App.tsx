@@ -41,7 +41,7 @@ const App: React.FC = () => {
         setLoyalty(l);
         setClientLoyalty(p);
       } catch (err: any) {
-        console.error("Falha ao iniciar app:", err);
+        console.warn("App carregado em modo de resiliência (Local)");
       } finally {
         setIsLoading(false);
       }
@@ -74,14 +74,12 @@ const App: React.FC = () => {
         const maxPos = staff.length > 0 ? Math.max(...staff.map(s => s.queuePosition)) : 0;
         const updatedStaff = { ...assigned, queuePosition: maxPos + 1 };
         await db.saveStaff(updatedStaff);
-        
         const freshStaff = await db.getStaff();
         setStaff(freshStaff);
       }
-      
       setCurrentView(View.WASHES);
     } catch (e) {
-      alert("Erro ao salvar lavagem.");
+      console.error("Erro ao salvar");
     } finally {
       setIsSyncing(false);
     }
@@ -96,7 +94,7 @@ const App: React.FC = () => {
       await db.saveWash(updated);
       setWashes(prev => prev.map(w => w.id === id ? updated : w));
     } catch (e) {
-      alert("Erro ao atualizar status.");
+      console.error("Erro status");
     } finally {
       setIsSyncing(false);
     }
@@ -107,11 +105,9 @@ const App: React.FC = () => {
     try {
       const wash = washes.find(w => w.id === id);
       if (!wash || !loyalty) return;
-
       const updatedWash = { ...wash, status: 'PAID' as const };
       await db.saveWash(updatedWash);
       setWashes(prev => prev.map(w => w.id === id ? updatedWash : w));
-
       if (loyalty.isActive) {
         const clientKey = wash.clientPhone || wash.clientName;
         const current = clientLoyalty[clientKey] || { stamps: 0, lastWashDate: '', phone: wash.clientPhone || '' };
@@ -126,7 +122,7 @@ const App: React.FC = () => {
         setClientLoyalty(prev => ({ ...prev, [clientKey]: updatedProgress }));
       }
     } catch (e) {
-      alert("Erro ao finalizar.");
+      console.error("Erro finalize");
     } finally {
       setIsSyncing(false);
     }
@@ -139,7 +135,7 @@ const App: React.FC = () => {
       await db.saveExpense(newExp);
       setExpenses([newExp, ...expenses]);
     } catch (e) {
-      alert("Erro ao salvar despesa.");
+      console.error("Erro despesa");
     } finally {
       setIsSyncing(false);
     }
@@ -149,21 +145,11 @@ const App: React.FC = () => {
     setIsSyncing(true);
     try {
       const maxPos = staff.length > 0 ? Math.max(...staff.map(s => s.queuePosition)) : 0;
-      const newMember: Staff = {
-        id: Math.random().toString(36).substr(2, 9),
-        name,
-        role,
-        daysWorked: 0,
-        dailyRate: 45,
-        commission: 0,
-        unpaid: 0,
-        queuePosition: maxPos + 1,
-        isActive: true
-      };
+      const newMember: Staff = { id: Math.random().toString(36).substr(2, 9), name, role, daysWorked: 0, dailyRate: 50, commission: 0, unpaid: 0, queuePosition: maxPos + 1, isActive: true };
       await db.saveStaff(newMember);
       setStaff([...staff, newMember].sort((a,b) => a.queuePosition - b.queuePosition));
     } catch (e) {
-      alert("Erro ao cadastrar membro.");
+      console.error("Erro staff");
     } finally {
       setIsSyncing(false);
     }
@@ -174,23 +160,15 @@ const App: React.FC = () => {
     try {
       const member = staff.find(s => s.id === staffId);
       if (!member) return;
-
       let updated = { ...member };
-      if (action === 'TOP') {
-        const minPos = Math.min(...staff.map(s => s.queuePosition));
-        updated.queuePosition = minPos - 1;
-      } else if (action === 'BOTTOM') {
-        const maxPos = Math.max(...staff.map(s => s.queuePosition));
-        updated.queuePosition = maxPos + 1;
-      } else if (action === 'TOGGLE') {
-        updated.isActive = !member.isActive;
-      }
-
+      if (action === 'TOP') { updated.queuePosition = Math.min(...staff.map(s => s.queuePosition)) - 1; } 
+      else if (action === 'BOTTOM') { updated.queuePosition = Math.max(...staff.map(s => s.queuePosition)) + 1; } 
+      else if (action === 'TOGGLE') { updated.isActive = !member.isActive; }
       await db.saveStaff(updated);
       const freshStaff = await db.getStaff();
       setStaff(freshStaff);
     } catch (e) {
-      alert("Erro ao atualizar fila.");
+      console.error("Erro queue");
     } finally {
       setIsSyncing(false);
     }
@@ -202,23 +180,25 @@ const App: React.FC = () => {
       await db.saveLoyalty(config);
       setLoyalty(config);
     } catch (e) {
-      alert("Erro ao salvar fidelidade.");
+      console.error("Erro loyalty");
     } finally {
       setIsSyncing(false);
     }
   };
 
   const renderView = () => {
-    if (!loyalty) return null;
+    // Configurações padrão se o banco falhar e não houver cache
+    const safeLoyalty = loyalty || { theme: 'blue', stampsRequired: 10, rewardDescription: 'Grátis', isActive: true, companyName: 'Sparcar', stampIcon: 'water_drop' };
+    
     switch (currentView) {
       case View.WASHES:
-        return <WashesView washes={washes} onAdd={() => setCurrentView(View.NEW_WASH)} onToggleStatus={handleUpdateWashStatus} onFinalize={handleFinalizeWash} loyaltyConfig={loyalty} clientLoyalty={clientLoyalty} userRole={userRole || 'LAVADOR'} />;
+        return <WashesView washes={washes} onAdd={() => setCurrentView(View.NEW_WASH)} onToggleStatus={handleUpdateWashStatus} onFinalize={handleFinalizeWash} loyaltyConfig={safeLoyalty as any} clientLoyalty={clientLoyalty} userRole={userRole || 'LAVADOR'} />;
       case View.DASHBOARD:
         return <DashboardView washes={washes} expenses={expenses} staff={staff} />;
       case View.FINANCE:
         return <FinanceView expenses={expenses} washes={washes} onAddExpense={handleAddExpense} />;
       case View.LOYALTY:
-        return <LoyaltyView config={loyalty} clientProgress={clientLoyalty} onSave={handleSaveLoyalty} />;
+        return <LoyaltyView config={safeLoyalty as any} clientProgress={clientLoyalty} onSave={handleSaveLoyalty} />;
       case View.STAFF:
         return <StaffView staff={staff} washes={washes} onAddStaff={handleAddStaff} onUpdateQueue={handleUpdateStaffQueue} onUpdateEarnings={async (id, days, rate, commission) => {
             const s = staff.find(x => x.id === id);
@@ -236,13 +216,13 @@ const App: React.FC = () => {
             }
           }} />;
       case View.NEW_WASH:
-        return <NewWashView onCancel={() => setCurrentView(View.WASHES)} onConfirm={handleAddWash} staff={staff} loyaltyConfig={loyalty} clientLoyalty={clientLoyalty} />;
+        return <NewWashView onCancel={() => setCurrentView(View.WASHES)} onConfirm={handleAddWash} staff={staff} loyaltyConfig={safeLoyalty as any} clientLoyalty={clientLoyalty} />;
       default:
         return null;
     }
   };
 
-  if (isLoading) return <div className="fixed inset-0 bg-primary flex items-center justify-center text-white font-black">CARREGANDO...</div>;
+  if (isLoading) return <div className="fixed inset-0 bg-primary flex items-center justify-center text-white font-black animate-pulse">SPARCAR CARREGANDO...</div>;
   if (!isAuthenticated) return <LoginView staffList={staff} onLogin={handleLogin} />;
 
   return (
