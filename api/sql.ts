@@ -13,15 +13,16 @@ export default async function handler(req: Request) {
     const body = await req.json();
     const { query, params } = body;
 
-    // Chave fornecida pelo usuário
-    const DATABASE_URL = process.env.DATABASE_URL || "postgresql://neondb_owner:npg_Zle4yEaI6BiN@ep-blue-voice-aj19kiu7-pooler.c-3.us-east-2.aws.neon.tech/neondb?sslmode=require";
+    // Chave corrigida conforme solicitado pelo usuário (DATABASE_URL_NEON)
+    const DATABASE_URL = process.env.DATABASE_URL_NEON || "postgresql://neondb_owner:npg_Zle4yEaI6BiN@ep-blue-voice-aj19kiu7-pooler.c-3.us-east-2.aws.neon.tech/neondb?sslmode=require";
     
-    // Extração do Host (removendo -pooler para a API HTTP)
+    // Extração do Host (removendo -pooler para a API HTTP, pois o endpoint HTTP é direto)
     const hostMatch = DATABASE_URL.match(/@([^/?#:]+)/);
     const rawHost = hostMatch ? hostMatch[1] : '';
-    const cleanHost = rawHost.replace('-pooler', ''); 
+    // A API de SQL do Neon responde no host sem o sufixo -pooler
+    const cleanHost = rawHost.includes('-pooler') ? rawHost.replace('-pooler', '') : rawHost; 
     
-    // Extração da Senha para o Bearer Token
+    // Extração da Senha para usar como Bearer Token na API HTTP
     const passMatch = DATABASE_URL.match(/:\/\/([^:]+):([^@]+)@/);
     const password = passMatch ? passMatch[2] : '';
 
@@ -39,7 +40,7 @@ export default async function handler(req: Request) {
     const result = await response.json();
     
     if (!response.ok) {
-      console.error("Neon Error:", result);
+      console.error("Erro na API Neon:", result);
       return new Response(JSON.stringify({ 
         error: 'Erro no Banco de Dados', 
         details: result.message || 'Falha na execução do SQL' 
@@ -48,9 +49,9 @@ export default async function handler(req: Request) {
 
     return new Response(JSON.stringify(result), { status: 200, headers: HEADERS });
   } catch (error: any) {
-    console.error("Critical Bridge Failure:", error.message);
+    console.error("Falha Crítica na Ponte SQL:", error.message);
     return new Response(JSON.stringify({ 
-      error: 'Falha de Conexão', 
+      error: 'Falha de Conexão com o Servidor', 
       message: error.message 
     }), { status: 500, headers: HEADERS });
   }
