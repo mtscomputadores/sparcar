@@ -13,16 +13,17 @@ export default async function handler(req: Request) {
     const body = await req.json();
     const { query, params } = body;
 
-    // Chave corrigida conforme solicitado pelo usuário (DATABASE_URL_NEON)
+    // Chave exata fornecida pelo usuário
     const DATABASE_URL = process.env.DATABASE_URL_NEON || "postgresql://neondb_owner:npg_Zle4yEaI6BiN@ep-blue-voice-aj19kiu7-pooler.c-3.us-east-2.aws.neon.tech/neondb?sslmode=require";
     
-    // Extração do Host (removendo -pooler para a API HTTP, pois o endpoint HTTP é direto)
+    // Extração robusta do host
+    // De: postgresql://user:pass@ep-id-pooler.region.aws.neon.tech/db
+    // Para: ep-id.region.aws.neon.tech
     const hostMatch = DATABASE_URL.match(/@([^/?#:]+)/);
     const rawHost = hostMatch ? hostMatch[1] : '';
-    // A API de SQL do Neon responde no host sem o sufixo -pooler
-    const cleanHost = rawHost.includes('-pooler') ? rawHost.replace('-pooler', '') : rawHost; 
+    const cleanHost = rawHost.replace('-pooler', ''); 
     
-    // Extração da Senha para usar como Bearer Token na API HTTP
+    // Senha (usada como Bearer Token na API HTTP do Neon)
     const passMatch = DATABASE_URL.match(/:\/\/([^:]+):([^@]+)@/);
     const password = passMatch ? passMatch[2] : '';
 
@@ -40,18 +41,16 @@ export default async function handler(req: Request) {
     const result = await response.json();
     
     if (!response.ok) {
-      console.error("Erro na API Neon:", result);
       return new Response(JSON.stringify({ 
-        error: 'Erro no Banco de Dados', 
-        details: result.message || 'Falha na execução do SQL' 
+        error: 'Neon API Error', 
+        details: result.message || 'Erro ao executar comando SQL no Neon' 
       }), { status: response.status, headers: HEADERS });
     }
 
     return new Response(JSON.stringify(result), { status: 200, headers: HEADERS });
   } catch (error: any) {
-    console.error("Falha Crítica na Ponte SQL:", error.message);
     return new Response(JSON.stringify({ 
-      error: 'Falha de Conexão com o Servidor', 
+      error: 'Connection Failure', 
       message: error.message 
     }), { status: 500, headers: HEADERS });
   }
