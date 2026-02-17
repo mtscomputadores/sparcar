@@ -27,12 +27,13 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const initApp = async () => {
-      // Carrega local storage primeiro para o app ser rápido
-      const localWashes = JSON.parse(localStorage.getItem('sparcar_pro_v6_washes') || '[]');
-      const localStaff = JSON.parse(localStorage.getItem('sparcar_pro_v6_staff') || '[]');
-      const localLoyalty = JSON.parse(localStorage.getItem('sparcar_pro_v6_loyalty') || 'null');
-      const localProgress = JSON.parse(localStorage.getItem('sparcar_pro_v6_progress') || '{}');
-      const localExpenses = JSON.parse(localStorage.getItem('sparcar_pro_v6_expenses') || '[]');
+      // Carrega local storage usando a mesma chave do database.ts
+      const prefix = 'sparcar_v1';
+      const localWashes = JSON.parse(localStorage.getItem(`${prefix}_washes`) || '[]');
+      const localStaff = JSON.parse(localStorage.getItem(`${prefix}_staff`) || '[]');
+      const localLoyalty = JSON.parse(localStorage.getItem(`${prefix}_loyalty`) || 'null');
+      const localProgress = JSON.parse(localStorage.getItem(`${prefix}_progress`) || '{}');
+      const localExpenses = JSON.parse(localStorage.getItem(`${prefix}_expenses`) || '[]');
       
       setWashes(localWashes);
       setExpenses(localExpenses);
@@ -45,7 +46,6 @@ const App: React.FC = () => {
       
       setIsLoading(false);
 
-      // Tenta Sincronizar com Neon (Auto-Setup)
       try {
         const connected = await db.init();
         setIsConnected(connected);
@@ -207,14 +207,13 @@ const App: React.FC = () => {
 
   if (isLoading) return <div className="fixed inset-0 bg-primary flex flex-col items-center justify-center text-white font-black animate-pulse">
     <span className="material-icons text-6xl mb-4">local_car_wash</span>
-    INICIANDO SPARCAR PRO...
+    INICIANDO SPARCAR...
   </div>;
 
   if (!isAuthenticated) return <LoginView staffList={staff} onLogin={handleLogin} />;
 
   return (
     <div className="flex flex-col min-h-screen bg-slate-50 dark:bg-slate-950 font-display text-slate-900 dark:text-slate-100">
-      {/* Indicadores de Status e Sincronização */}
       <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex gap-2">
         {isSyncing && (
           <div className="bg-slate-900/90 text-white px-6 py-2 rounded-full text-[10px] font-black uppercase flex items-center gap-2 shadow-2xl backdrop-blur-md">

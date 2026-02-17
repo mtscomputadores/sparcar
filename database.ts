@@ -1,7 +1,7 @@
 
 import { Wash, Staff, Expense, LoyaltyConfig, ClientProgress } from './types';
 
-const STORAGE_KEY_PREFIX = 'sparcar_api_v2';
+const STORAGE_KEY_PREFIX = 'sparcar_v1';
 
 const storage = {
   get: (key: string) => JSON.parse(localStorage.getItem(`${STORAGE_KEY_PREFIX}_${key}`) || 'null'),
@@ -9,38 +9,31 @@ const storage = {
 };
 
 async function request(path: string, method = 'GET', body?: any) {
+  const url = path.startsWith('/') ? path : `/${path}`;
   try {
-    const res = await fetch(path, {
+    const res = await fetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: body ? JSON.stringify(body) : undefined
     });
     
-    const data = await res.json();
     if (!res.ok) {
-      console.error(`❌ Erro na API (${path}):`, data.error || 'Erro desconhecido');
-      throw new Error(data.error || 'Falha na API');
+      const errorText = await res.text();
+      throw new Error(`Erro ${res.status}: ${errorText || 'Falha na requisição'}`);
     }
-    return data;
+
+    return await res.json();
   } catch (e: any) {
-    console.error(`🔥 Falha crítica ao acessar ${path}:`, e.message);
     throw e;
   }
 }
 
 export const db = {
   async init() {
-    console.log("🚀 Sparcar: Sincronizando tabelas...");
     try {
-      // Tenta inicializar lavagens e equipe (as duas tabelas críticas)
-      await Promise.all([
-        request('/api/washes'),
-        request('/api/staff')
-      ]);
-      console.log("✅ API e Tabelas prontas.");
+      await request('/api/washes');
       return true;
-    } catch (e: any) {
-      console.warn("⚠️ Operando em modo offline:", e.message);
+    } catch {
       return false;
     }
   },
@@ -61,11 +54,7 @@ export const db = {
   async saveWash(wash: Wash): Promise<void> {
     const current = await this.getWashes();
     storage.set('washes', [wash, ...current.filter(w => w.id !== wash.id)]);
-    try {
-      await request('/api/washes', 'POST', wash);
-    } catch (e) {
-      console.error("Erro ao salvar lavagem remotamente:", e);
-    }
+    await request('/api/washes', 'POST', wash).catch(() => {});
   },
 
   async getStaff(): Promise<Staff[]> {
@@ -73,7 +62,7 @@ export const db = {
       const data = await request('/api/staff');
       const formatted = data.map((s: any) => ({
         ...s,
-        dailyRate: parseFloat(s.dailyRate || s.dailyrate || 50),
+        dailyRate: parseFloat(s.dailyRate || s.dailyrate || 0),
         commission: parseFloat(s.commission || 0),
         unpaid: parseFloat(s.unpaid || 0),
         isActive: Boolean(s.isActive ?? s.isactive ?? true)
@@ -86,15 +75,13 @@ export const db = {
   async saveStaff(s: Staff): Promise<void> {
     const current = await this.getStaff();
     storage.set('staff', current.map(x => x.id === s.id ? s : x));
-    try {
-      await request('/api/staff', 'POST', s);
-    } catch {}
+    await request('/api/staff', 'POST', s).catch(() => {});
   },
 
   async getLoyalty(): Promise<LoyaltyConfig> {
     try {
       const rows = await request('/api/loyalty?type=config');
-      const data = rows[0] || { theme: 'grad-ocean', stampsRequired: 10, rewardDescription: 'Grátis', isActive: true, companyName: 'Sparcar', stampIcon: 'water_drop' };
+      const data = rows[0] || { theme: 'grad-ocean', stampsRequired: 10, rewardDescription: 'Lavagem Grátis', isActive: true, companyName: 'Sparcar', stampIcon: 'water_drop' };
       storage.set('loyalty', data);
       return data;
     } catch { return storage.get('loyalty'); }
@@ -102,9 +89,7 @@ export const db = {
 
   async saveLoyalty(config: LoyaltyConfig): Promise<void> {
     storage.set('loyalty', config);
-    try {
-      await request('/api/loyalty?type=config', 'POST', config);
-    } catch {}
+    await request('/api/loyalty?type=config', 'POST', config).catch(() => {});
   },
 
   async getClientProgress(): Promise<Record<string, ClientProgress>> {
@@ -129,9 +114,7 @@ export const db = {
   async saveClientProgress(key: string, p: ClientProgress): Promise<void> {
     const current = await this.getClientProgress();
     storage.set('progress', { ...current, [key]: p });
-    try {
-      await request('/api/loyalty?type=progress', 'POST', { clientKey: key, ...p });
-    } catch {}
+    await request('/api/loyalty?type=progress', 'POST', { clientKey: key, ...p }).catch(() => {});
   },
 
   async getExpenses(): Promise<Expense[]> {
@@ -146,8 +129,6 @@ export const db = {
   async saveExpense(e: Expense): Promise<void> {
     const current = await this.getExpenses();
     storage.set('expenses', [e, ...current.filter(x => x.id !== e.id)]);
-    try {
-      await request('/api/expenses', 'POST', e);
-    } catch {}
+    await request('/api/expenses', 'POST', e).catch(() => {});
   }
 };
