@@ -23,16 +23,18 @@ export default async function handler(req: Request) {
     const body = await req.json();
     const { query, params, connectionString } = body;
 
-    let dbUrl = (connectionString || process.env.DATABASE_URL || '').trim();
+    // Usando a URL fornecida pelo usuário como fallback imediato para o preview
+    const USER_DATABASE_URL = "postgresql://neondb_owner:npg_Zle4yEaI6BiN@ep-blue-voice-aj19kiu7-pooler.c-3.us-east-2.aws.neon.tech/neondb?sslmode=require";
+    
+    let dbUrl = (connectionString || process.env.DATABASE_URL || USER_DATABASE_URL).trim();
     
     if (!dbUrl) {
       return new Response(JSON.stringify({ error: 'DATABASE_URL não configurada' }), { status: 400, headers: HEADERS });
     }
 
-    // O Proxy Global do Neon é o endpoint mais robusto para evitar erros 400 e de senha.
     const NEON_PROXY_URL = 'https://proxy.neon.tech/sql';
 
-    // Garante que a string use postgresql:// e não tenha o sufixo -pooler que às vezes causa erro no modo HTTP
+    // Limpeza da string para modo HTTP
     dbUrl = dbUrl.replace('-pooler', '');
 
     const response = await fetch(NEON_PROXY_URL, {
@@ -50,7 +52,7 @@ export default async function handler(req: Request) {
       console.error('Erro Neon:', result);
       return new Response(JSON.stringify({ 
         error: result.error || 'Erro de Autenticação/Conexão', 
-        message: result.message || 'Falha ao autenticar com o Neon. Verifique a senha.' 
+        message: result.message || 'Falha ao conectar com o Neon. Verifique os dados.' 
       }), { status: response.status, headers: HEADERS });
     }
 
