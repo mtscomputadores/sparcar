@@ -20,7 +20,7 @@ const DEFAULT_STAFF: Staff[] = [
 
 async function callApi(sql: string, params: any[] = []) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 6000); // 6 segundos de timeout
+  const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 segundos para o setup inicial
 
   try {
     const res = await fetch('/api/sql', {
@@ -47,16 +47,16 @@ const storage = {
 
 export const db = {
   async init() {
-    console.log("🚀 Sparcar Auto-Setup: Verificando Banco Remoto...");
+    console.log("🚀 Sparcar Auto-Setup: Inicializando tabelas no Neon...");
     try {
-      // 1. Criar tabelas uma a uma
+      // 1. Criar tabelas uma a uma para garantir a estrutura
       await callApi(`CREATE TABLE IF NOT EXISTS washes (id TEXT PRIMARY KEY, clientName TEXT, clientPhone TEXT, plate TEXT, model TEXT, type TEXT, status TEXT, assignedStaff TEXT, price NUMERIC, services TEXT, vehicleType TEXT, date TEXT);`);
       await callApi(`CREATE TABLE IF NOT EXISTS staff (id TEXT PRIMARY KEY, name TEXT, role TEXT, photo TEXT, daysWorked INTEGER DEFAULT 0, dailyRate NUMERIC DEFAULT 50, commission NUMERIC DEFAULT 0, unpaid NUMERIC DEFAULT 0, queuePosition INTEGER, isActive BOOLEAN DEFAULT true);`);
       await callApi(`CREATE TABLE IF NOT EXISTS loyalty_config (id INTEGER PRIMARY KEY CHECK (id = 1), theme TEXT, stampsRequired INTEGER, rewardDescription TEXT, isActive BOOLEAN, companyName TEXT, companySubtitle TEXT, companyLogo TEXT, stampIcon TEXT);`);
       await callApi(`CREATE TABLE IF NOT EXISTS client_progress (clientKey TEXT PRIMARY KEY, stamps INTEGER, lastWashDate TEXT, phone TEXT);`);
       await callApi(`CREATE TABLE IF NOT EXISTS expenses (id TEXT PRIMARY KEY, category TEXT, description TEXT, amount NUMERIC, date TEXT, status TEXT, paymentMethod TEXT, installments INTEGER, operator TEXT, brand TEXT);`);
 
-      // 2. Popular staff se estiver vazio
+      // 2. Popular equipe inicial se o banco estiver vazio
       const checkStaff = await callApi("SELECT COUNT(*) FROM staff");
       if (parseInt(checkStaff.rows[0].count) === 0) {
         for (const s of DEFAULT_STAFF) {
@@ -64,17 +64,17 @@ export const db = {
         }
       }
 
-      console.log("✅ Banco Neon Sincronizado com Sucesso!");
+      console.log("✅ Banco Neon configurado e pronto!");
       return true;
     } catch (e: any) {
-      console.warn("⚠️ Falha na conexão remota. O App funcionará em Modo Offline.", e.message);
+      console.warn("⚠️ Não foi possível conectar ao Neon. Usando armazenamento local.", e.message);
       return false;
     }
   },
 
   async getWashes(): Promise<Wash[]> {
     try {
-      const res = await callApi("SELECT * FROM washes ORDER BY date DESC, id DESC LIMIT 100");
+      const res = await callApi("SELECT * FROM washes ORDER BY date DESC, id DESC LIMIT 200");
       const data = (res.rows || []).map((r: any) => ({ 
         ...r, 
         services: JSON.parse(r.services || '[]'), 
@@ -91,7 +91,7 @@ export const db = {
     try {
       await callApi(`INSERT INTO washes (id, clientName, clientPhone, plate, model, type, status, assignedStaff, price, services, vehicleType, date) 
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) 
-                    ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, price = EXCLUDED.price`, 
+                    ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, price = EXCLUDED.price, clientPhone = EXCLUDED.clientPhone`, 
       [wash.id, wash.clientName, wash.clientPhone, wash.plate, wash.model, wash.type, wash.status, wash.assignedStaff, wash.price, JSON.stringify(wash.services), wash.vehicleType, wash.date]);
     } catch {}
   },
@@ -135,7 +135,7 @@ export const db = {
     try {
       await callApi(`INSERT INTO loyalty_config (id, theme, stampsRequired, rewardDescription, isActive, companyName, companySubtitle, companyLogo, stampIcon) 
                     VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8) 
-                    ON CONFLICT (id) DO UPDATE SET theme = EXCLUDED.theme, isActive = EXCLUDED.isActive, rewardDescription = EXCLUDED.rewardDescription, stampsRequired = EXCLUDED.stampsRequired`, 
+                    ON CONFLICT (id) DO UPDATE SET theme = EXCLUDED.theme, isActive = EXCLUDED.isActive, rewardDescription = EXCLUDED.rewardDescription, stampsRequired = EXCLUDED.stampsRequired, companyName = EXCLUDED.companyName, companySubtitle = EXCLUDED.companySubtitle, companyLogo = EXCLUDED.companyLogo, stampIcon = EXCLUDED.stampIcon`, 
       [config.theme, config.stampsRequired, config.rewardDescription, config.isActive, config.companyName, config.companySubtitle, config.companyLogo, config.stampIcon]);
     } catch {}
   },
@@ -156,14 +156,14 @@ export const db = {
     try {
       await callApi(`INSERT INTO client_progress (clientKey, stamps, lastWashDate, phone) 
                     VALUES ($1, $2, $3, $4) 
-                    ON CONFLICT (clientKey) DO UPDATE SET stamps = EXCLUDED.stamps, lastWashDate = EXCLUDED.lastWashDate`, 
+                    ON CONFLICT (clientKey) DO UPDATE SET stamps = EXCLUDED.stamps, lastWashDate = EXCLUDED.lastWashDate, phone = EXCLUDED.phone`, 
                     [key, p.stamps, p.lastWashDate, p.phone]);
     } catch {}
   },
 
   async getExpenses(): Promise<Expense[]> {
     try {
-      const res = await callApi("SELECT * FROM expenses ORDER BY date DESC, id DESC LIMIT 100");
+      const res = await callApi("SELECT * FROM expenses ORDER BY date DESC, id DESC LIMIT 200");
       const data = (res.rows || []).map((r: any) => ({ 
         ...r, 
         amount: parseFloat(r.amount) 
@@ -179,7 +179,7 @@ export const db = {
     try {
       await callApi(`INSERT INTO expenses (id, category, description, amount, date, status, paymentMethod, installments, operator, brand) 
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) 
-                    ON CONFLICT (id) DO UPDATE SET amount = EXCLUDED.amount, status = EXCLUDED.status`, 
+                    ON CONFLICT (id) DO UPDATE SET amount = EXCLUDED.amount, status = EXCLUDED.status, description = EXCLUDED.description`, 
       [e.id, e.category, e.description, e.amount, e.date, e.status, e.paymentMethod, e.installments, e.operator, e.brand]);
     } catch {}
   }
