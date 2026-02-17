@@ -27,12 +27,12 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const initApp = async () => {
-      // Carregamento IMEDIATO do cache local
-      const localWashes = JSON.parse(localStorage.getItem('sparcar_pro_v5_washes') || '[]');
-      const localStaff = JSON.parse(localStorage.getItem('sparcar_pro_v5_staff') || '[]');
-      const localLoyalty = JSON.parse(localStorage.getItem('sparcar_pro_v5_loyalty') || 'null');
-      const localProgress = JSON.parse(localStorage.getItem('sparcar_pro_v5_progress') || '{}');
-      const localExpenses = JSON.parse(localStorage.getItem('sparcar_pro_v5_expenses') || '[]');
+      // Carrega local storage primeiro para o app ser rápido
+      const localWashes = JSON.parse(localStorage.getItem('sparcar_pro_v6_washes') || '[]');
+      const localStaff = JSON.parse(localStorage.getItem('sparcar_pro_v6_staff') || '[]');
+      const localLoyalty = JSON.parse(localStorage.getItem('sparcar_pro_v6_loyalty') || 'null');
+      const localProgress = JSON.parse(localStorage.getItem('sparcar_pro_v6_progress') || '{}');
+      const localExpenses = JSON.parse(localStorage.getItem('sparcar_pro_v6_expenses') || '[]');
       
       setWashes(localWashes);
       setExpenses(localExpenses);
@@ -45,7 +45,7 @@ const App: React.FC = () => {
       
       setIsLoading(false);
 
-      // Sincronização em segundo plano com Auto-Setup
+      // Tenta Sincronizar com Neon (Auto-Setup)
       try {
         const connected = await db.init();
         setIsConnected(connected);
@@ -206,19 +206,19 @@ const App: React.FC = () => {
 
   if (isLoading) return <div className="fixed inset-0 bg-primary flex flex-col items-center justify-center text-white font-black animate-pulse">
     <span className="material-icons text-6xl mb-4">local_car_wash</span>
-    LAVA JATO PRO CARREGANDO...
+    INICIANDO SPARCAR...
   </div>;
 
   if (!isAuthenticated) return <LoginView staffList={staff} onLogin={handleLogin} />;
 
   return (
     <div className="flex flex-col min-h-screen bg-slate-50 dark:bg-slate-950 font-display text-slate-900 dark:text-slate-100">
-      {/* Barra de Status */}
+      {/* Indicadores de Status */}
       <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex gap-2">
         {isSyncing && (
           <div className="bg-slate-900/90 text-white px-6 py-2 rounded-full text-[10px] font-black uppercase flex items-center gap-2 shadow-2xl backdrop-blur-md">
             <div className="w-2 h-2 bg-primary rounded-full animate-pulse"></div>
-            Processando...
+            Sincronizando...
           </div>
         )}
         <div className={`px-4 py-2 rounded-full text-[9px] font-black uppercase flex items-center gap-2 shadow-xl backdrop-blur-md border ${
@@ -227,7 +227,7 @@ const App: React.FC = () => {
           'bg-slate-500/10 text-slate-500 border-slate-500/20'
         }`}>
           <span className="material-icons text-[12px]">{isConnected === true ? 'cloud_done' : isConnected === false ? 'cloud_off' : 'cloud_sync'}</span>
-          {isConnected === true ? 'ONLINE' : isConnected === false ? 'OFFLINE' : 'SINCRONIZANDO...'}
+          {isConnected === true ? 'ONLINE' : isConnected === false ? 'MODO LOCAL' : 'CONECTANDO...'}
         </div>
       </div>
 

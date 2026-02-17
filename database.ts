@@ -1,7 +1,7 @@
 
 import { Wash, Staff, Expense, LoyaltyConfig, ClientProgress } from './types';
 
-const STORAGE_KEY_PREFIX = 'sparcar_pro_v5';
+const STORAGE_KEY_PREFIX = 'sparcar_v6';
 
 const DEFAULT_LOYALTY: LoyaltyConfig = {
   theme: 'grad-ocean',
@@ -20,7 +20,7 @@ const DEFAULT_STAFF: Staff[] = [
 
 async function callApi(sql: string, params: any[] = []) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 8000);
+  const timeoutId = setTimeout(() => controller.abort(), 6000); // 6 segundos de timeout
 
   try {
     const res = await fetch('/api/sql', {
@@ -47,22 +47,16 @@ const storage = {
 
 export const db = {
   async init() {
-    console.log("🛠️ Iniciando Auto-Setup no Neon...");
+    console.log("🚀 Sparcar Auto-Setup: Verificando Banco Remoto...");
     try {
-      // Sequência de criação de tabelas
-      const setupQueries = [
-        `CREATE TABLE IF NOT EXISTS washes (id TEXT PRIMARY KEY, clientName TEXT, clientPhone TEXT, plate TEXT, model TEXT, type TEXT, status TEXT, assignedStaff TEXT, price NUMERIC, services TEXT, vehicleType TEXT, date TEXT);`,
-        `CREATE TABLE IF NOT EXISTS staff (id TEXT PRIMARY KEY, name TEXT, role TEXT, photo TEXT, daysWorked INTEGER DEFAULT 0, dailyRate NUMERIC DEFAULT 50, commission NUMERIC DEFAULT 0, unpaid NUMERIC DEFAULT 0, queuePosition INTEGER, isActive BOOLEAN DEFAULT true);`,
-        `CREATE TABLE IF NOT EXISTS loyalty_config (id INTEGER PRIMARY KEY CHECK (id = 1), theme TEXT, stampsRequired INTEGER, rewardDescription TEXT, isActive BOOLEAN, companyName TEXT, companySubtitle TEXT, companyLogo TEXT, stampIcon TEXT);`,
-        `CREATE TABLE IF NOT EXISTS client_progress (clientKey TEXT PRIMARY KEY, stamps INTEGER, lastWashDate TEXT, phone TEXT);`,
-        `CREATE TABLE IF NOT EXISTS expenses (id TEXT PRIMARY KEY, category TEXT, description TEXT, amount NUMERIC, date TEXT, status TEXT, paymentMethod TEXT, installments INTEGER, operator TEXT, brand TEXT);`
-      ];
+      // 1. Criar tabelas uma a uma
+      await callApi(`CREATE TABLE IF NOT EXISTS washes (id TEXT PRIMARY KEY, clientName TEXT, clientPhone TEXT, plate TEXT, model TEXT, type TEXT, status TEXT, assignedStaff TEXT, price NUMERIC, services TEXT, vehicleType TEXT, date TEXT);`);
+      await callApi(`CREATE TABLE IF NOT EXISTS staff (id TEXT PRIMARY KEY, name TEXT, role TEXT, photo TEXT, daysWorked INTEGER DEFAULT 0, dailyRate NUMERIC DEFAULT 50, commission NUMERIC DEFAULT 0, unpaid NUMERIC DEFAULT 0, queuePosition INTEGER, isActive BOOLEAN DEFAULT true);`);
+      await callApi(`CREATE TABLE IF NOT EXISTS loyalty_config (id INTEGER PRIMARY KEY CHECK (id = 1), theme TEXT, stampsRequired INTEGER, rewardDescription TEXT, isActive BOOLEAN, companyName TEXT, companySubtitle TEXT, companyLogo TEXT, stampIcon TEXT);`);
+      await callApi(`CREATE TABLE IF NOT EXISTS client_progress (clientKey TEXT PRIMARY KEY, stamps INTEGER, lastWashDate TEXT, phone TEXT);`);
+      await callApi(`CREATE TABLE IF NOT EXISTS expenses (id TEXT PRIMARY KEY, category TEXT, description TEXT, amount NUMERIC, date TEXT, status TEXT, paymentMethod TEXT, installments INTEGER, operator TEXT, brand TEXT);`);
 
-      for (const query of setupQueries) {
-        await callApi(query);
-      }
-
-      // Se a tabela de staff estiver vazia, popula com os iniciais
+      // 2. Popular staff se estiver vazio
       const checkStaff = await callApi("SELECT COUNT(*) FROM staff");
       if (parseInt(checkStaff.rows[0].count) === 0) {
         for (const s of DEFAULT_STAFF) {
@@ -70,17 +64,17 @@ export const db = {
         }
       }
 
-      console.log("✅ Auto-Setup Concluído com Sucesso!");
+      console.log("✅ Banco Neon Sincronizado com Sucesso!");
       return true;
     } catch (e: any) {
-      console.error("❌ Falha no Auto-Setup:", e.message);
+      console.warn("⚠️ Falha na conexão remota. O App funcionará em Modo Offline.", e.message);
       return false;
     }
   },
 
   async getWashes(): Promise<Wash[]> {
     try {
-      const res = await callApi("SELECT * FROM washes ORDER BY date DESC, id DESC");
+      const res = await callApi("SELECT * FROM washes ORDER BY date DESC, id DESC LIMIT 100");
       const data = (res.rows || []).map((r: any) => ({ 
         ...r, 
         services: JSON.parse(r.services || '[]'), 
@@ -169,7 +163,7 @@ export const db = {
 
   async getExpenses(): Promise<Expense[]> {
     try {
-      const res = await callApi("SELECT * FROM expenses ORDER BY date DESC, id DESC");
+      const res = await callApi("SELECT * FROM expenses ORDER BY date DESC, id DESC LIMIT 100");
       const data = (res.rows || []).map((r: any) => ({ 
         ...r, 
         amount: parseFloat(r.amount) 

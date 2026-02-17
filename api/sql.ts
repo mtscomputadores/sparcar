@@ -10,16 +10,18 @@ export default async function handler(req: Request) {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: HEADERS });
   
   try {
-    const { query, params } = await req.json();
+    const body = await req.json();
+    const { query, params } = body;
 
-    // Prioriza DATABASE_URL do ambiente Vercel. Caso não exista, usa a sua de fallback.
+    // Chave fornecida pelo usuário
     const DATABASE_URL = process.env.DATABASE_URL || "postgresql://neondb_owner:npg_Zle4yEaI6BiN@ep-blue-voice-aj19kiu7-pooler.c-3.us-east-2.aws.neon.tech/neondb?sslmode=require";
     
-    // Extração precisa do Host e Password para a API HTTP do Neon
+    // Extração do Host (removendo -pooler para a API HTTP)
     const hostMatch = DATABASE_URL.match(/@([^/?#:]+)/);
     const rawHost = hostMatch ? hostMatch[1] : '';
-    const cleanHost = rawHost.replace('-pooler', ''); // API HTTP não usa o pooler
+    const cleanHost = rawHost.replace('-pooler', ''); 
     
+    // Extração da Senha para o Bearer Token
     const passMatch = DATABASE_URL.match(/:\/\/([^:]+):([^@]+)@/);
     const password = passMatch ? passMatch[2] : '';
 
@@ -37,18 +39,18 @@ export default async function handler(req: Request) {
     const result = await response.json();
     
     if (!response.ok) {
-      console.error("Neon API Error Detail:", result);
+      console.error("Neon Error:", result);
       return new Response(JSON.stringify({ 
-        error: 'Erro no Neon', 
-        details: result.message || 'Erro de permissão ou conexão' 
+        error: 'Erro no Banco de Dados', 
+        details: result.message || 'Falha na execução do SQL' 
       }), { status: response.status, headers: HEADERS });
     }
 
     return new Response(JSON.stringify(result), { status: 200, headers: HEADERS });
   } catch (error: any) {
-    console.error("Bridge Failure:", error.message);
+    console.error("Critical Bridge Failure:", error.message);
     return new Response(JSON.stringify({ 
-      error: 'Falha na Comunicação', 
+      error: 'Falha de Conexão', 
       message: error.message 
     }), { status: 500, headers: HEADERS });
   }
