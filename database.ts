@@ -1,7 +1,7 @@
 
 import { Wash, Staff, Expense, LoyaltyConfig, ClientProgress } from './types';
 
-const STORAGE_KEY_PREFIX = 'sparcar_v6';
+const STORAGE_KEY_PREFIX = 'sparcar_pro_v7';
 
 const DEFAULT_LOYALTY: LoyaltyConfig = {
   theme: 'grad-ocean',
@@ -20,7 +20,8 @@ const DEFAULT_STAFF: Staff[] = [
 
 async function callApi(sql: string, params: any[] = []) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 segundos para o setup inicial
+  // Aumentado para 30 segundos para suportar cold starts do banco e da Vercel
+  const timeoutId = setTimeout(() => controller.abort(), 30000); 
 
   try {
     const res = await fetch('/api/sql', {
@@ -30,12 +31,18 @@ async function callApi(sql: string, params: any[] = []) {
       signal: controller.signal
     });
 
+    if (!res.ok) {
+      const errorData = await res.json();
+      throw new Error(errorData.details || errorData.error || 'Erro desconhecido na API');
+    }
+
     const data = await res.json();
     clearTimeout(timeoutId);
-    if (!res.ok) throw new Error(data.details || data.error);
     return data;
-  } catch (e) {
+  } catch (e: any) {
     clearTimeout(timeoutId);
+    // Melhora a mensagem de erro para o usuário
+    if (e.name === 'AbortError') throw new Error('O banco demorou muito para responder (Timeout de 30s). Tente recarregar.');
     throw e;
   }
 }
@@ -47,16 +54,22 @@ const storage = {
 
 export const db = {
   async init() {
-    console.log("🚀 Sparcar Auto-Setup: Inicializando tabelas no Neon...");
+    console.log("🛠️ Iniciando Auto-Setup no Neon (Timeout: 30s)...");
     try {
-      // 1. Criar tabelas uma a uma para garantir a estrutura
-      await callApi(`CREATE TABLE IF NOT EXISTS washes (id TEXT PRIMARY KEY, clientName TEXT, clientPhone TEXT, plate TEXT, model TEXT, type TEXT, status TEXT, assignedStaff TEXT, price NUMERIC, services TEXT, vehicleType TEXT, date TEXT);`);
-      await callApi(`CREATE TABLE IF NOT EXISTS staff (id TEXT PRIMARY KEY, name TEXT, role TEXT, photo TEXT, daysWorked INTEGER DEFAULT 0, dailyRate NUMERIC DEFAULT 50, commission NUMERIC DEFAULT 0, unpaid NUMERIC DEFAULT 0, queuePosition INTEGER, isActive BOOLEAN DEFAULT true);`);
-      await callApi(`CREATE TABLE IF NOT EXISTS loyalty_config (id INTEGER PRIMARY KEY CHECK (id = 1), theme TEXT, stampsRequired INTEGER, rewardDescription TEXT, isActive BOOLEAN, companyName TEXT, companySubtitle TEXT, companyLogo TEXT, stampIcon TEXT);`);
-      await callApi(`CREATE TABLE IF NOT EXISTS client_progress (clientKey TEXT PRIMARY KEY, stamps INTEGER, lastWashDate TEXT, phone TEXT);`);
-      await callApi(`CREATE TABLE IF NOT EXISTS expenses (id TEXT PRIMARY KEY, category TEXT, description TEXT, amount NUMERIC, date TEXT, status TEXT, paymentMethod TEXT, installments INTEGER, operator TEXT, brand TEXT);`);
+      // Criação das tabelas necessárias
+      const queries = [
+        `CREATE TABLE IF NOT EXISTS washes (id TEXT PRIMARY KEY, clientName TEXT, clientPhone TEXT, plate TEXT, model TEXT, type TEXT, status TEXT, assignedStaff TEXT, price NUMERIC, services TEXT, vehicleType TEXT, date TEXT);`,
+        `CREATE TABLE IF NOT EXISTS staff (id TEXT PRIMARY KEY, name TEXT, role TEXT, photo TEXT, daysWorked INTEGER DEFAULT 0, dailyRate NUMERIC DEFAULT 50, commission NUMERIC DEFAULT 0, unpaid NUMERIC DEFAULT 0, queuePosition INTEGER, isActive BOOLEAN DEFAULT true);`,
+        `CREATE TABLE IF NOT EXISTS loyalty_config (id INTEGER PRIMARY KEY CHECK (id = 1), theme TEXT, stampsRequired INTEGER, rewardDescription TEXT, isActive BOOLEAN, companyName TEXT, companySubtitle TEXT, companyLogo TEXT, stampIcon TEXT);`,
+        `CREATE TABLE IF NOT EXISTS client_progress (clientKey TEXT PRIMARY KEY, stamps INTEGER, lastWashDate TEXT, phone TEXT);`,
+        `CREATE TABLE IF NOT EXISTS expenses (id TEXT PRIMARY KEY, category TEXT, description TEXT, amount NUMERIC, date TEXT, status TEXT, paymentMethod TEXT, installments INTEGER, operator TEXT, brand TEXT);`
+      ];
 
-      // 2. Popular equipe inicial se o banco estiver vazio
+      for (const q of queries) {
+        await callApi(q);
+      }
+
+      // Popula staff se estiver vazio
       const checkStaff = await callApi("SELECT COUNT(*) FROM staff");
       if (parseInt(checkStaff.rows[0].count) === 0) {
         for (const s of DEFAULT_STAFF) {
@@ -64,10 +77,10 @@ export const db = {
         }
       }
 
-      console.log("✅ Banco Neon configurado e pronto!");
+      console.log("✅ Banco de Dados Neon Sincronizado!");
       return true;
     } catch (e: any) {
-      console.warn("⚠️ Não foi possível conectar ao Neon. Usando armazenamento local.", e.message);
+      console.error("❌ Falha na Conexão Neon:", e.message);
       return false;
     }
   },
@@ -91,7 +104,7 @@ export const db = {
     try {
       await callApi(`INSERT INTO washes (id, clientName, clientPhone, plate, model, type, status, assignedStaff, price, services, vehicleType, date) 
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) 
-                    ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, price = EXCLUDED.price, clientPhone = EXCLUDED.clientPhone`, 
+                    ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, price = EXCLUDED.price`, 
       [wash.id, wash.clientName, wash.clientPhone, wash.plate, wash.model, wash.type, wash.status, wash.assignedStaff, wash.price, JSON.stringify(wash.services), wash.vehicleType, wash.date]);
     } catch {}
   },
@@ -135,7 +148,7 @@ export const db = {
     try {
       await callApi(`INSERT INTO loyalty_config (id, theme, stampsRequired, rewardDescription, isActive, companyName, companySubtitle, companyLogo, stampIcon) 
                     VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8) 
-                    ON CONFLICT (id) DO UPDATE SET theme = EXCLUDED.theme, isActive = EXCLUDED.isActive, rewardDescription = EXCLUDED.rewardDescription, stampsRequired = EXCLUDED.stampsRequired, companyName = EXCLUDED.companyName, companySubtitle = EXCLUDED.companySubtitle, companyLogo = EXCLUDED.companyLogo, stampIcon = EXCLUDED.stampIcon`, 
+                    ON CONFLICT (id) DO UPDATE SET theme = EXCLUDED.theme, isActive = EXCLUDED.isActive, rewardDescription = EXCLUDED.rewardDescription, stampsRequired = EXCLUDED.stampsRequired`, 
       [config.theme, config.stampsRequired, config.rewardDescription, config.isActive, config.companyName, config.companySubtitle, config.companyLogo, config.stampIcon]);
     } catch {}
   },
@@ -156,7 +169,7 @@ export const db = {
     try {
       await callApi(`INSERT INTO client_progress (clientKey, stamps, lastWashDate, phone) 
                     VALUES ($1, $2, $3, $4) 
-                    ON CONFLICT (clientKey) DO UPDATE SET stamps = EXCLUDED.stamps, lastWashDate = EXCLUDED.lastWashDate, phone = EXCLUDED.phone`, 
+                    ON CONFLICT (clientKey) DO UPDATE SET stamps = EXCLUDED.stamps, lastWashDate = EXCLUDED.lastWashDate`, 
                     [key, p.stamps, p.lastWashDate, p.phone]);
     } catch {}
   },
@@ -179,7 +192,7 @@ export const db = {
     try {
       await callApi(`INSERT INTO expenses (id, category, description, amount, date, status, paymentMethod, installments, operator, brand) 
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) 
-                    ON CONFLICT (id) DO UPDATE SET amount = EXCLUDED.amount, status = EXCLUDED.status, description = EXCLUDED.description`, 
+                    ON CONFLICT (id) DO UPDATE SET amount = EXCLUDED.amount, status = EXCLUDED.status`, 
       [e.id, e.category, e.description, e.amount, e.date, e.status, e.paymentMethod, e.installments, e.operator, e.brand]);
     } catch {}
   }
