@@ -1,27 +1,30 @@
 
 import { Wash, Staff, Expense, LoyaltyConfig, ClientProgress } from './types';
 
-// Função auxiliar para chamadas SQL via proxy API
 async function query(sql: string, params: any[] = []) {
-  const response = await fetch('/api/sql', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query: sql, params })
-  });
-  
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.error || 'Erro na consulta SQL');
-  return result;
+  try {
+    const response = await fetch('/api/sql', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: sql, params })
+    });
+    
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.message || result.error || 'Erro na consulta SQL');
+    return result;
+  } catch (err: any) {
+    console.error("Database query error:", err);
+    throw err;
+  }
 }
 
 export const db = {
   isLocal: false,
 
   async init() {
-    console.log("🚀 Inicializando Banco de Dados Neon...");
+    console.log("🚀 Tentando conectar ao Neon PostgreSQL...");
     
     try {
-      // Criar tabelas se não existirem
       await query(`
         CREATE TABLE IF NOT EXISTS washes (
           id TEXT PRIMARY KEY,
@@ -92,14 +95,12 @@ export const db = {
         );
       `);
 
-      // Inicializar Staff padrão se vazio
       const currentStaff = await this.getStaff();
       if (currentStaff.length === 0) {
         await this.saveStaff({ id: '1', name: 'João Silva', role: 'Lavador', daysWorked: 0, dailyRate: 45, commission: 0, unpaid: 0, queuePosition: 1, isActive: true });
         await this.saveStaff({ id: '2', name: 'Maria Souza', role: 'Lavador', daysWorked: 0, dailyRate: 45, commission: 0, unpaid: 0, queuePosition: 2, isActive: true });
       }
 
-      // Inicializar Loyalty padrão se vazio
       const currentLoyalty = await this.getLoyalty();
       if (!currentLoyalty) {
         await this.saveLoyalty({
@@ -113,8 +114,10 @@ export const db = {
         });
       }
 
+      console.log("✅ Conectado ao Neon com sucesso!");
     } catch (e) {
-      console.error("Erro ao inicializar tabelas:", e);
+      console.error("❌ Falha na conexão com o banco de dados:", e);
+      throw e;
     }
   },
 
@@ -154,7 +157,7 @@ export const db = {
     const res = await query("SELECT * FROM staff ORDER BY queuePosition ASC");
     return res.rows.map((r: any) => ({
       ...r,
-      dailyRate: parseFloat(r.dailyrate),
+      dailyRate: parseFloat(r.dailyrate || r.dailyRate),
       commission: parseFloat(r.commission),
       unpaid: parseFloat(r.unpaid)
     }));
@@ -227,9 +230,9 @@ export const db = {
     const res = await query("SELECT * FROM client_progress");
     const progress: Record<string, ClientProgress> = {};
     res.rows.forEach((r: any) => {
-      progress[r.clientkey] = {
+      progress[r.clientkey || r.clientKey] = {
         stamps: r.stamps,
-        lastWashDate: r.lastwashdate,
+        lastWashDate: r.lastwashdate || r.lastWashDate,
         phone: r.phone
       };
     });
